@@ -10,6 +10,9 @@ Ares / 引擎内部地址是怎么来的**。
 | 功能 | 文档 | 状态 | 依赖 |
 |---|---|---|---|
 | 单位提供超级武器 | [unit-superweapons.md](unit-superweapons.md) | ✅ 实测通过 | Ares 3.0 |
+| 范围升/降星超级武器（`Type=PromoteAura`） | [promote-aura-superweapon.md](promote-aura-superweapon.md) | ✅ 实测通过（含发射后指针复位） | Ares 3.0 |
+| 升级换单位（`Promote.VeteranType` / `EliteType` + 血量/星级策略） | [promotion-convert.md](promotion-convert.md) | ✅ 实测通过（"三星之后再升级"需求已砍，见该文档 §1.5） | Ares 3.0 |
+| 心控屏蔽区间（`MindControlShield.*`） | [mind-control-shield.md](mind-control-shield.md) | ✅ 实测通过（禁止开火 + 解除心控） | 无 |
 
 ## 新增一篇功能文档
 

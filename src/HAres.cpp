@@ -1,5 +1,9 @@
 #include <HAres.h>
 
+#include <Misc/AresHelpers.h>
+#include <Misc/MindControlShield.h>
+#include <Misc/PromoteAura.h>
+#include <Misc/PromoteConvert.h>
 #include <Misc/UnitSuperWeapon.h>
 #include <Utilities/Debug.h>
 #include <Utilities/Patch.h>
@@ -90,8 +94,16 @@ void HAres::ExeRun()
 	Patch::ApplyStatic();
 
 	// Ares is injected by Syringe before the game starts, so it is already loaded
-	// here. This installs the patch that lets units provide superweapons.
+	// here. AresHelpers reads the module and its build once; every Ares-dependent
+	// feature is version gated on that.
+	AresHelpers::Init();
+
+	// This installs the patch that lets units provide superweapons.
 	UnitSuperWeapon::InitAresIntegration();
+
+	// Promotion conversion observes rank changes through Ares' own rank update
+	// helper, so its call sites have to be redirected here.
+	PromoteConvert::InitAresIntegration();
 
 	Debug::LogLine("[Init] complete");
 }

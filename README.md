@@ -101,6 +101,9 @@ derived. General development practice lives in the guide.
 | Feature | Doc | Depends on |
 |---|---|---|
 | Unit-provided superweapons | [unit-superweapons.md](docs/functions/unit-superweapons.md) | Ares 3.0 |
+| Area promotion/demotion superweapon (`Type=PromoteAura`) | [promote-aura-superweapon.md](docs/functions/promote-aura-superweapon.md) | Ares 3.0 |
+| Change type on promotion (`Promote.VeteranType` / `EliteType`, health/star policy) | [promotion-convert.md](docs/functions/promotion-convert.md) | Ares 3.0 |
+| Mind control shield zones (`MindControlShield.*`) | [mind-control-shield.md](docs/functions/mind-control-shield.md) | - |
 
 ## Research
 
@@ -120,6 +123,11 @@ src/HAres.cpp                 lifecycle, config, DllMain
 src/Misc/Hooks.Demo.cpp       DEFINE_HOOK entries and the hook template
 src/Misc/UnitSuperWeapon.*    unit-provided superweapons: INI registry and queries
 src/Misc/AresUnitSuperWeapon.cpp  the Ares 3.0 call-site patch
+src/Misc/AresHelpers.*        Ares module/version lookup and Ares' ConvertTypeTo
+src/Misc/PromoteAura.*        Type=PromoteAura superweapon: area promotion/demotion
+src/Misc/PromoteConvert.*     change type on promotion (Promote.*Type)
+src/Misc/MindControlShield.*  mind control shield zones
+src/Misc/SharedUtils.h        house filters, cell-to-lepton ranges, INI helpers
 src/Utilities/                logging, patch engine, patch macros
 docs/DEVELOPMENT.md           general development guide
 docs/functions/               one document per implemented feature

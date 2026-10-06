@@ -21,8 +21,12 @@
   <!-- Compiled files. Add every new .cpp here or it will not be compiled. -->
   <ItemGroup>
     <ClCompile Include="src\HAres.cpp" />
+    <ClCompile Include="src\Misc\AresHelpers.cpp" />
     <ClCompile Include="src\Misc\AresUnitSuperWeapon.cpp" />
     <ClCompile Include="src\Misc\Hooks.Demo.cpp" />
+    <ClCompile Include="src\Misc\MindControlShield.cpp" />
+    <ClCompile Include="src\Misc\PromoteAura.cpp" />
+    <ClCompile Include="src\Misc\PromoteConvert.cpp" />
     <ClCompile Include="src\Misc\UnitSuperWeapon.cpp" />
     <ClCompile Include="src\Utilities\Debug.cpp" />
     <ClCompile Include="src\Utilities\Patch.cpp" />
@@ -31,6 +35,11 @@
   <ItemGroup>
     <ClInclude Include="src\HAres.h" />
     <ClInclude Include="src\HAres.version.h" />
+    <ClInclude Include="src\Misc\AresHelpers.h" />
+    <ClInclude Include="src\Misc\MindControlShield.h" />
+    <ClInclude Include="src\Misc\PromoteAura.h" />
+    <ClInclude Include="src\Misc\PromoteConvert.h" />
+    <ClInclude Include="src\Misc\SharedUtils.h" />
     <ClInclude Include="src\Misc\UnitSuperWeapon.h" />
     <ClInclude Include="src\Utilities\Debug.h" />
     <ClInclude Include="src\Utilities\Macro.h" />

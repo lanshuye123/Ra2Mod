@@ -1,5 +1,8 @@
 #include <HAres.h>
 
+#include <Misc/MindControlShield.h>
+#include <Misc/PromoteAura.h>
+#include <Misc/PromoteConvert.h>
 #include <Misc/UnitSuperWeapon.h>
 #include <Utilities/Debug.h>
 #include <Utilities/Macro.h>
@@ -180,6 +183,18 @@ DEFINE_HOOK(0x683E7F, HAres_ScenarioClass_Start, 0x7)
 	// SuperWeapon= keys on unit types can be read.
 	UnitSuperWeapon::BuildRegistry();
 	UnitSuperWeapon::LogRegistry();
+
+	// Every feature keeps its rulesmd.ini derived tables here. They are rebuilt
+	// per match, and each of them also builds lazily on first use so that a
+	// loaded savegame (which does not start a scenario) still works.
+	PromoteAura::BuildRegistry();
+	PromoteAura::LogRegistry();
+
+	PromoteConvert::BuildRegistry();
+	PromoteConvert::LogRegistry();
+
+	MindControlShield::BuildRegistry();
+	MindControlShield::LogRegistry();
 
 	auto const pScenario = ScenarioClass::Instance;
 

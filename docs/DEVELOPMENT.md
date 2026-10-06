@@ -38,7 +38,10 @@ scripts\restore_game_dir.bat
 本仓库就是这样一个已经能编译、能注入、能执行 hook 的最小可用工程。
 
 **已实现功能**见 [`functions/`](functions/)，目前有
-[单位提供超级武器](functions/unit-superweapons.md)。
+[单位提供超级武器](functions/unit-superweapons.md)、
+[范围升/降星超级武器](functions/promote-aura-superweapon.md)、
+[升级换单位](functions/promotion-convert.md)、
+[心控屏蔽区间](functions/mind-control-shield.md)。
 
 ---
 
@@ -940,6 +943,12 @@ HAres\scripts\restore_game_dir.bat
 | `0x4F4583` | 6 | `GScreenClass` 文本绘制（每帧） | `DSurface::Composite` 可用 |
 | `0x683E7F` | 7 | `ScenarioClass::Start`（开局） | — |
 | `0x7CD8EF` | 9 | 进程退出 | — |
+| `0x6CC390` | 6 | `SuperClass::Launch`（超级武器发射） | ECX=`SuperClass*`，`[ESP+4]=const CellStruct*`，`[ESP+8]=bool` |
+| `0x6F9E50` | 5 | `TechnoClass::AI`（每单位每帧） | ECX/ESI=`TechnoClass*` |
+| `0x6FA14B` | 6 | `TechnoClass::AI` 内的老兵等级汇合点（Ares 的 veterancy hook 跳回这里） | ESI=`TechnoClass*` |
+| `0x6FC356` | 6 | `TechnoClass::GetFireError` 内部（已选好武器） | EDI=`WeaponTypeClass*`，ESI=`TechnoClass*` |
+| `Ares+0x46AF0` | — | Ares 的老兵等级更新函数（**调用**，非 hook） | `void __stdcall (TechnoClass*, bool, bool)` |
+| `Ares+0x4F2CF/0x4F2EB/0x46B94` | — | 上面那个函数的三个调用点（**改调用点**） | 见 `functions/promotion-convert.md` §2.3 |
 
 ### 9.2 常用 YRpp 设施
 
@@ -1041,3 +1050,6 @@ HAres 源码      D:\Codes\RA2Mods\HAres
 | 功能 | 文档 | 状态 | 依赖 |
 |---|---|---|---|
 | 单位提供超级武器 | [functions/unit-superweapons.md](functions/unit-superweapons.md) | ✅ 实测通过 | Ares 3.0 |
+| 范围升/降星超级武器 | [functions/promote-aura-superweapon.md](functions/promote-aura-superweapon.md) | ✅ 实测通过 | Ares 3.0 |
+| 升级换单位 | [functions/promotion-convert.md](functions/promotion-convert.md) | ✅ 实测通过 | Ares 3.0 |
+| 心控屏蔽区间 | [functions/mind-control-shield.md](functions/mind-control-shield.md) | ✅ 实测通过 | 无 |
