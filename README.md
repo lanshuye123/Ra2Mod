@@ -92,13 +92,26 @@ WatermarkCorner=0      ; 0=top-left 1=top-right 2=bottom-left 3=bottom-right
 - Export names must be unique across the process; prefix them with `HAres_`.
 - Do not change the ABI-critical compiler options in `HAres.props` - see section 1.4 of the guide.
 
+## Features
+
+Each feature has its own document under [`docs/functions/`](docs/functions/) describing what it does,
+how to use it, why it is implemented that way, and how the Ares/engine addresses it hardcodes were
+derived. General development practice lives in the guide.
+
+| Feature | Doc | Depends on |
+|---|---|---|
+| Unit-provided superweapons | [unit-superweapons.md](docs/functions/unit-superweapons.md) | Ares 3.0 |
+
 ## Layout
 
 ```
-src/HAres.cpp              lifecycle, config, DllMain
-src/Misc/Hooks.Demo.cpp    all DEFINE_HOOK entries and the hook template
-src/Utilities/             logging, patch engine, patch macros
-docs/DEVELOPMENT.md        the development guide
-scripts/                   build, deploy, restore
-YRpp/                      game binary type definitions (submodule)
+src/HAres.cpp                 lifecycle, config, DllMain
+src/Misc/Hooks.Demo.cpp       DEFINE_HOOK entries and the hook template
+src/Misc/UnitSuperWeapon.*    unit-provided superweapons: INI registry and queries
+src/Misc/AresUnitSuperWeapon.cpp  the Ares 3.0 call-site patch
+src/Utilities/                logging, patch engine, patch macros
+docs/DEVELOPMENT.md           general development guide
+docs/functions/               one document per implemented feature
+scripts/                      build, deploy, restore
+YRpp/                         game binary type definitions (submodule)
 ```

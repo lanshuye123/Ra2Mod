@@ -2,6 +2,10 @@
 
 > 本文档面向"魔改《红色警戒2：尤里的复仇》引擎"这一目标，基于本机 **已实际编译并运行验证** 的环境写成。
 > 文中标注 ✅ 的内容是本次实测跑通的；标注 ⚠️ 的是已知限制或未实测的路径。
+>
+> **本文档只写通用方法。** 具体功能的说明、原理与用法在
+> [`functions/`](functions/)（一个功能一篇，索引见 §10）。
+> 新增功能请按 [`functions/README.md`](functions/README.md) 的骨架写。
 
 ---
 
@@ -32,6 +36,9 @@ scripts\restore_game_dir.bat
 **核心结论**：在 Ares 只开源到 0.A（2016）而实机装的是闭源 Ares 3.0 的现实下，"魔改 Ares"最可行的形态是
 **写一个和 Ares/Phobos 并存的扩展 DLL（HAres.dll）**，用同一套 Syringe + YRpp + hook 技术栈去改引擎行为。
 本仓库就是这样一个已经能编译、能注入、能执行 hook 的最小可用工程。
+
+**已实现功能**见 [`functions/`](functions/)，目前有
+[单位提供超级武器](functions/unit-superweapons.md)。
 
 ---
 
@@ -393,7 +400,10 @@ HAres\
 │   ├── deploy.bat                 拷贝 DLL+PDB 到游戏目录
 │   └── restore_game_dir.bat       还原游戏目录到验证前状态
 ├── docs\
-│   └── DEVELOPMENT.md             本文档
+│   ├── DEVELOPMENT.md             本文档：通用开发方法
+│   └── functions\                 功能专项文档，一个功能一篇（见 §10）
+│       ├── README.md              索引 + 新功能文档的写作骨架
+│       └── unit-superweapons.md   单位提供超级武器
 └── src\
     ├── HAres.version.h            版本号 / 产品名（改名从这里改）
     ├── HAres.h                    对外状态声明（刻意不引入 YRpp）
@@ -404,12 +414,18 @@ HAres\
     │   ├── Macro.h                静态补丁宏：DEFINE_PATCH / DEFINE_JUMP / ...
     │   └── Patch.h / Patch.cpp    补丁执行引擎 + .patch 段遍历
     └── Misc\
-        └── Hooks.Demo.cpp         所有 hook 都写在这里（含教学模板）
+        ├── Hooks.Demo.cpp         生命周期 hook + 教学模板
+        ├── UnitSuperWeapon.*      单位提供超武：INI 注册表与查询
+        └── AresUnitSuperWeapon.cpp  改写 Ares 3.0 的调用点
 ```
 
 **分层原则**：`HAres.h` / `HAres.cpp` 只依赖 Win32，不引入 YRpp；
 所有和游戏对象打交道的代码放在 `src\Misc\` 或 `src\Ext\` 下并 `#include <YRPP.h>`。
 这样配置/日志这部分逻辑不会因为 YRpp 变化而受影响。
+
+**文档分层原则**：本文档只写**通用**的东西（构建、hook 机制、调用约定、与 Ares 共存、
+调试、常见坑、引擎字段参考）。**具体功能**的说明、原理与用法写到 `docs\functions\<功能名>.md`，
+本文档 §10 只保留索引。
 
 ---
 
@@ -608,6 +624,138 @@ Phobos 的做法是 `PhobosStreamReader` / `PhobosStreamWriter` + `.Process()` �
 入口在 `Phobos.Save.cpp` 挂的一系列 Save/Load hook。
 `SNAPSHOT`/`SWIZZLE` 相关的 hook 也需要一并处理指针重定位。
 
+### 5.9 调用游戏 / Ares 里的函数（调用约定）
+
+当你直接用函数指针调进 `gamemd.exe` 或 `Ares.dll` 的某个内部函数时，
+**调用约定猜错不会编译报错，而是默默破坏栈**，几十帧后跳到垃圾地址崩溃。
+症状长这样（Phobos 的崩溃报告）：
+
+```
+Exception (Code: 0xC0000005 at 0x329344F8)
+Bytes at CS:EIP: A0 A8 7E 00 84 A8 7E 00 ...   ← EIP 落在数据表里
+```
+
+#### 怎么判定
+
+| 线索 | 结论 |
+|---|---|
+| 函数末尾是 `C3`（`RET`） | 调用方清栈 → `__cdecl` |
+| 函数末尾是 `C2 04 00`（`RET 4`） | 被调方清 1 个参数 → `__stdcall` |
+| 调用点后面**没有** `ADD ESP, n` | 被调方清栈（`__stdcall` / `__thiscall`） |
+| 调用点后面**有** `ADD ESP, n` | 调用方清栈（`__cdecl`） |
+
+也可以直接问 Ghidra：反编译出来的签名会写 `__cdecl` / `__stdcall` / `__fastcall`，
+**但 Ghidra 的推断并非总是可靠**，用 `RET` 形态交叉验证最稳。
+
+#### 本项目栈的实际规则
+
+**本技术栈（gamemd.exe / Ares / Phobos / SyringeEx / HAres）全部用 `/Gz` 编译**，
+默认调用约定是 `__stdcall`。于是：
+
+- **自由函数**（没有显式写约定）→ **`__stdcall`**，`this` 无关，参数在栈上且由被调方清理。
+- **类的成员函数** → `__thiscall`（`this` 走 ECX）。
+- **Syringe hook 导出函数** → 由 YRpp 的 `EXPORT_FUNC` 宏显式声明为 `__cdecl`
+  （末尾是裸 `RET`），因为 Syringe 的 trampoline 自己清栈。
+
+⚠️ 所以**不要因为 hook 是 `__cdecl`，就以为 Ares 里的函数也是 `__cdecl`**。
+这两者在同一个 DLL 里就是不同的 —— 这正是本节存在的原因。
+
+#### 防御性写法
+
+```cpp
+// 从反汇编确认过的签名，把约定写死在 typedef 上
+using GetSWStatuses_t = std::vector<Status>* (__stdcall*)(HouseClass*);
+
+// 包装函数自己也要用同样的约定，否则调用点那边的栈同样会错
+std::vector<Status>* __stdcall Wrapper(HouseClass* pHouse) { ... }
+```
+
+### 5.10 与 Ares 共存：hook 链会被非零返回值截断
+
+**这是给 Ares 写扩展时最容易踩、也最难自己发现的坑。**
+
+Syringe 支持多个 DLL 在同一地址挂 hook，按 DLL 名顺序链式调用
+（`Ares.dll` → `HAres.dll` → `Phobos.dll`）。但链式调用有一个硬性前提：
+
+> **只有 `return 0` 的 hook 才会把控制权交给链上的下一个 hook。**
+> 一旦某个 hook 返回非零地址，trampoline 直接跳过去，后面的 hook **永远不会执行**。
+
+Ares 大量使用这种"整体替换"写法。例如：
+
+| 地址 | Ares 的 hook | 返回值 |
+|---|---|---|
+| `0x50AF10` | `HouseClass_UpdateSuperWeaponsOwned` | `0x50B1CA`（非零） |
+| `0x50B1D0` | `HouseClass_UpdateSuperWeaponsUnavailable` | `0x50B36E`（非零） |
+| `0x6CB7B0` | `SuperClass_Lose` | `0x6CB810`（非零） |
+
+**诊断方法**：在 `syringe.log` 里能看到你自己的 hook 所在 DLL 被识别、hook 总数也涨了，
+但你的 `Debug::LogLine` 一行都不输出 —— 那就说明链在你之前就断了。
+
+**怎么确认某个地址是否被 Ares 独占**：直接读 `D:\Games\Ra2\Ares.dll.inj`
+（Ares 自己的 hook 清单，纯文本，格式 `地址 = 函数名, 长度`）：
+
+```powershell
+Select-String -Path "D:\Games\Ra2\Ares.dll.inj" -Pattern "50AF10|6CB7B0"
+```
+
+#### 三条出路
+
+| 方案 | 适用 | 代价 |
+|---|---|---|
+| **改 Ares 内部的调用点**（推荐） | Ares 有个中间函数/数据结构可以挂钩 | 依赖 Ares 版本，需要按版本定位偏移 |
+| **换一个 Ares 没占用的注入点** | 引擎里还有等价的、Ares 没动的函数 | 需要另找地址，语义可能不完整 |
+| **自己驱动 + 中和 Ares 的行为** | 只能用引擎公开 API 时 | 容易和 Ares 互相打架（反复 Grant/Lose、图标闪烁、充能重置） |
+
+第一种通常最干净：找个 Ares 内部的中间函数，把**它的调用点**改指向你的包装函数，
+先跑 Ares 原逻辑再补上你的部分。这样下游仍然是 Ares 自己的代码，
+不存在状态争夺。具体案例见 [`functions/unit-superweapons.md`](functions/unit-superweapons.md)。
+
+#### 版本门控
+
+Ares 的内部 RVA 会随版本变，所以**必须按版本门控**，识别不出来就干净地停用自己：
+
+```cpp
+// 读 PE 头的 TimeDateStamp 判版本，和 Phobos 的 AresHelper 同一套做法
+const auto stamp = pNt->FileHeader.TimeDateStamp;
+if (stamp != 0x5fc37ef6) { Debug::LogLine("unsupported Ares version"); return; }
+```
+
+| Ares 版本 | PE `TimeDateStamp` |
+|---|---|
+| 3.0 | `0x5fc37ef6` |
+| 3.0p1 | `0x61daa114` |
+
+### 5.11 定位 Ares 内部函数（不必等完整反汇编）
+
+想知道"Ares 把某个功能改写到哪个函数里"，有个**不需要完整反汇编**的可靠办法。
+思路是：**Ares 的 hook 函数是导出符号，从导出函数出发反推它调用了谁。**
+
+1. **拿到导出函数的 RVA**：
+
+   ```powershell
+   dumpbin /nologo /exports "D:\Games\Ra2\Ares.dll" | Select-String "UpdateSuperWeapons"
+   #   559  22E 00039580 HouseClass_UpdateSuperWeaponsUnavailable
+   ```
+
+2. **界定函数范围**：把所有导出 RVA 排序，下一个导出就是本函数的右边界。
+
+3. **扫描 `E8 rel32`**：在函数体内逐字节找 `0xE8`，算出调用目标
+   （`目标 = 当前地址 + 5 + rel32`）。
+
+4. **取交集**：对两个功能相关的导出函数各扫一遍，**共同调用的目标**就是那个中间函数。
+   Ares 的两个 hook 都会调用同一个 `GetSuperWeaponStatuses`，所以交集里必有它。
+
+5. **按源码顺序消歧**：交集可能有多个候选（本例 3 个）。用 Ares 0.A 的开源源码
+   看调用顺序就能定下来（`GetSuperWeaponStatuses` 是第一个被调的，
+   后面两个是 `GetObjectTabIdx` 和 `RepaintSidebar`）。
+
+6. **用 Ghidra 复核**：在反汇编里确认它就是你要找的函数
+   （参数、返回、内部结构）。地址是 RVA，Ghidra 里要加上映像基址
+   （Ares 是 `0x10000000`，所以 RVA `0x38F10` 对应 `0x10038F10`）。
+
+> 这套"导出表 + 调用目标交集"的办法对**闭源 DLL** 特别有用，
+> 因为闭源 DLL 没有符号，但**导出表一定在**。
+
 ---
 
 ## 6. 调试与排错
@@ -775,8 +923,9 @@ HAres\scripts\restore_game_dir.bat
 | SyringeEx 下把游戏参数直接跟在后头 | 游戏只收到 `argv[0]`，`-LOG` 等全丢 | 必须 `--args="..."`（§7.1） |
 | 不加 `-WIN` | DirectDraw `CreateSurface 80070057` 后退出 | 用窗口模式启动 |
 | 连续 kill 后立刻再启动 Syringe | `拒绝访问` 无法启动 | 等 10 秒左右再启动 |
-| 调用 Ares/游戏函数时猜调用约定 | 栈被破坏，几帧后跳到垃圾地址崩 | 本栈全是 `/Gz`，自由函数默认 **`__stdcall`**；用反汇编末尾的 `RET n` 确认（§10.4） |
-| 想 hook Ares 已接管的函数 | 自己的 hook 根本不执行 | Ares 的 hook `return` 非零，链就断了；只能改 Ares 内部或另找注入点（§10.3） |
+| 调用 Ares/游戏函数时猜调用约定 | 栈被破坏，几帧后跳到垃圾地址崩 | 本栈全是 `/Gz`，自由函数默认 **`__stdcall`**；看函数末尾 `RET n` 确认（§5.9） |
+| 想 hook Ares 已接管的函数 | 自己的 hook 根本不执行 | Ares 的 hook `return` 非零会截断链；只能改 Ares 内部或另找注入点（§5.10） |
+| Ghidra 里按 RVA 找不到函数 | `Function not found` / `not in mapped memory` | Ghidra 用**映像基址**寻址；Ares 是 `0x10000000`，RVA `0x38F10` → `0x10038F10` |
 
 ---
 
@@ -829,142 +978,66 @@ HAres 源码      D:\Codes\RA2Mods\HAres
 - IDA Pro MCP（让 AI 直接查反汇编，做 hook 开发强烈推荐）：
   <https://github.com/mrexodia/ida-pro-mcp>
 
----
+### 9.5 常用引擎字段偏移（已用反汇编核对）
 
-## 10. 实战案例：让单位提供超级武器（已实现并实测通过）
+写 hook 时常需要绕过 YRpp 直接按偏移访问。下面这些是在 `gamemd.exe` **1.11** 上核对过的，
+可以直接用，但**换游戏版本后要重新确认**。
 
-这是本工程第一个真正的功能，完整走了一遍"读源码 → 反汇编 → 设计 → 实现 → 上机验证"，
-可作为以后做其它功能的模板。
+#### `SuperClass`（超武实例）
 
-### 10.1 需求与语义
+| 字段 | 偏移 | 备注 |
+|---|---|---|
+| `Type` | +0x28 | `SuperWeaponTypeClass*` |
+| `Owner` | +0x2C | `HouseClass*` |
+| `RechargeTimer` | +0x30 | `CDTimerClass`，0xC 字节 |
+| `CanHold` | +0x60 | |
+| `Granted` | +0x6D | ⚠️ Phobos 的 YRpp 叫 `IsPresent` |
+| `OneTime` | +0x6E | ⚠️ Phobos 叫 `IsOneTime` |
+| `IsCharged` | +0x6F | ⚠️ Phobos 叫 `IsReady` |
+| `IsOnHold` | +0x70 | ⚠️ Phobos 叫 `IsSuspended` |
 
-让**载具 / 步兵 / 飞机**也能给玩家提供超武，而不只是建筑：
+> 两套名字**偏移与顺序完全一致**，只是命名不同（Phobos 的更贴近引擎实际行为）。
+> 反汇编可用于交叉验证：`SuperClass::Lose`（`0x6CB7B0`）把 `+0x6D` 和 `+0x6F` 清零，
+> `SetReadiness`（`0x6CB820`）写 `+0x6F`。
 
-```ini
-[MTNK]
-SuperWeapon=IronCurtainSpecial
-SuperWeapon2=AmericasParaDropSpecial
-SuperWeapons=ChronoSphereSpecial,AmericasParaDropSpecial   ; 列表形式
-```
-
-语义：玩家**拥有至少一辆**该单位时获得超武，全部损失后失去。超武仍然是玩家级的
-（侧边栏按钮 → 点地图发射），单位只是"会移动的提供者"。
-
-### 10.2 原版机制
-
-`HouseClass::UpdateSuperWeaponsOwned`（`0x50AF10`）与 `UpdateSuperWeaponsUnavailable`（`0x50B1D0`）
-在每个 house 更新时跑，扫描该 house 的建筑，看 `BuildingTypeClass::SuperWeapon`（类型 +0x16F0）
-/ `SuperWeapon2`（+0x16F4）是否等于某个超武下标，然后决定 `Grant` / `Lose` / `SetOnHold`。
-原版还会扫描建筑的第 3 个字段（升级槽）。
-
-关键结构（已用反汇编核对）：
+#### `HouseClass`
 
 | 字段 | 偏移 |
 |---|---|
-| `SuperClass::Type` | +0x28 |
-| `SuperClass::CanHold` | +0x60 |
-| `SuperClass::Granted`（Phobos 里叫 `IsPresent`） | +0x6D |
-| `SuperClass::OneTime`（`IsOneTime`） | +0x6E |
-| `SuperClass::IsCharged`（`IsReady`） | +0x6F |
-| `SuperClass::IsOnHold`（`IsSuspended`） | +0x70 |
-| `HouseClass::Supers`（数据指针 / 个数） | +0x258 / +0x264 |
-| `HouseClass::Defeated` | +0x1F5 |
-| `BuildingTypeClass::SuperWeapon` / `SuperWeapon2` | +0x16F0 / +0x16F4 |
+| `RecheckTechTree` | +0x1FC |
+| `Defeated` | +0x1F5 |
+| `Supers` 数据指针 / 个数 | +0x258 / +0x264 |
 
-> 注意 Phobos 的 YRpp 与 Ares 的 YRpp 给同一批字段起了不同名字
-> （`Granted`→`IsPresent`、`IsCharged`→`IsReady`、`IsOnHold`→`IsSuspended`），
-> **偏移和顺序完全一致**，用哪套名字都行，但别被名字绕晕。
+`HouseClass::Supers` 与 `SuperWeaponTypeClass::Array` 按 `ArrayIndex` **1:1 对齐**，
+所以 `pHouse->Supers[swType->ArrayIndex]` 永远有效。
 
-### 10.3 与 Ares 的冲突（本次最大的坑）
+#### `BuildingTypeClass`
 
-Ares 3.0 把这两个函数**整个替换掉了**，而且它的 hook 都 `return` 一个非零地址；
-Syringe 只对 `return 0` 的 hook 做链式调用，所以**我们在同样地址上挂 hook 永远不会被执行**。
-`SuperClass::Lose`（`0x6CB7B0`）同理。
-
-Ares 3.0 的实际实现（反汇编得到，比 0.A 源码更简单）：
-
-```cpp
-// Ares.dll + 0x38F10，__stdcall
-std::vector<SWStatus>* GetSuperWeaponStatuses(HouseClass* pHouse);
-// SWStatus = { bool Available; bool PowerSourced; bool Charging; }  每项 3 字节，
-// 由 SuperWeaponTypeClass::ArrayIndex 索引
-```
-
-两个 hook 都调用它。它只扫 `pHouse->Buildings`。
-
-**解法**：把这两处对 `GetSuperWeaponStatuses` 的调用**改指向我们自己的包装函数**——
-先调用原函数，再把"由单位提供"的超武标成可用。之后 Ares 自己的
-Grant / Lose / SetOnHold / 侧边栏 cameo / 断电规则全部照旧生效，不存在任何状态争夺。
-
-实测的调用点（`Ares.dll`，PE 时间戳 `0x5fc37ef6`，即 3.0）：
-
-| 位置 | RVA |
+| 字段 | 偏移 |
 |---|---|
-| `GetSuperWeaponStatuses` | `0x38F10` |
-| 第一个调用点（Owned） | `0x3945B` |
-| 第二个调用点（Unavailable） | `0x395A7` |
+| `SuperWeapon` | +0x16F0 |
+| `SuperWeapon2` | +0x16F4 |
 
-定位方法（可复用，不必依赖 Ghidra）：Ares 的两个 hook 是**导出函数**，用
-`dumpbin /exports` 拿到它们的 RVA，然后在各自函数体内扫描 `E8 rel32` 调用，
-**取两个函数调用目标的交集**，再按源码里的调用顺序确定哪个是目标函数。
+#### 常用全局
 
-### 10.4 第二个坑：调用约定
+| 全局 | 地址 | YRpp 里的名字 |
+|---|---|---|
+| 当前玩家 house | `0xA83D4C` | `HouseClass::CurrentPlayer` |
+| 观察者 house | `0xAC1198` | `HouseClass::Observer` |
+| 当前选中的超武 | `0x8809A0` | `Unsorted::CurrentSWType` |
+| 规则 INI | `0x887048` | `CCINIClass::INI_Rules` |
+| 建筑数组 / 数量 | `0xA8EB44` / `0xA8EB50` | — |
+| 超武计时器列表 | `0xA83D50` | `SuperClass::ShowTimers` |
 
-Ares、Phobos、HAres 都用 `/Gz`（默认 `__stdcall`）。所以 Ares 里的**自由函数**
-（不是显式写了 `__cdecl` 的 Syringe hook 导出）默认是 **`__stdcall`**。
+---
 
-第一版我把 `GetSuperWeaponStatuses` 声明成了 `__cdecl`，结果每次调用**栈多弹 4 字节**，
-跑几十帧后跳到垃圾地址崩溃：
+## 10. 已实现功能
 
-```
-Exception (Code: 0xC0000005 at 0x329344F8)
-Eax:5F291C90        ← Ares 基址 0x5F1D0000 + 0xC1C90，正是那个静态 vector
-Bytes at CS:EIP: A0 A8 7E 00 84 A8 7E 00 ...   ← EIP 落在数据表里
-```
+功能专项文档放在 [`functions/`](functions/)，**每篇只讲那个功能本身**
+（它做了什么、为什么这么做、怎么用，以及它硬编码的 Ares / 引擎地址是怎么推导出来的）；
+本文档只保留通用方法。新增功能建议按
+[`functions/README.md`](functions/README.md) 里的骨架写。
 
-**怎么确认调用约定**：看函数末尾的 `RET`：
-- `C3` → `RET`，无参清理 → `__cdecl`（调用方清栈）
-- `C2 04 00` → `RET 4` → `__stdcall`，清理 1 个参数（被调方清栈）
-
-本例三个出口都是 `C2 04 00`，即 `__stdcall`。**改对之后就再也没崩过。**
-
-### 10.5 实测结果
-
-`HAres.log`（`RunHAres.bat` 启动，Ares 3.0 + Phobos + HAres）：
-
-```
-[UnitSW] redirected GetSuperWeaponStatuses call at Ares+0x3945B
-[UnitSW] redirected GetSuperWeaponStatuses call at Ares+0x395A7
-[UnitSW] Ares 3.0 integration ACTIVE (2 call site(s) patched)
-[UnitSW] AMCV provides 1 superweapon(s)
-[UnitSW] registry built: 3 provider(s), 1 distinct superweapon(s)
-[UnitSW] "IronCurtainSpecial": providedByUnit=1 granted=0 charged=0 rechargeLeft=0
-[UnitSW] superweapon "IronCurtainSpecial" (index 1) made available by a unit provider to the human player
-[UnitSW] "IronCurtainSpecial": providedByUnit=1 granted=1 charged=0 rechargeLeft=4499   ← Ares 授予并开始充能
-[UnitSW] "IronCurtainSpecial": providedByUnit=0 granted=0 charged=0 rechargeLeft=4247   ← 单位没了 → 超武收回
-[UnitSW] "IronCurtainSpecial": providedByUnit=1 granted=1 charged=0 rechargeLeft=4499   ← 单位回来 → 重新授予
-```
-
-第二轮的状态变化正好对应 MCV 展开成建造厂（`providedByUnit` 1→0）以及之后又拥有提供者。
-全程 `syringe.log` 只有那两个正常的 `0xE06D7363`，**没有任何访问违例**。
-
-### 10.6 代码位置
-
-| 文件 | 作用 |
-|---|---|
-| `src\Misc\UnitSuperWeapon.cpp/.h` | 读 INI 建立"提供者"表；O(1) 查询 house 是否拥有提供者；诊断日志 |
-| `src\Misc\AresUnitSuperWeapon.cpp` | 识别 Ares 版本、按 RVA 改写两个调用点、包装函数 |
-| `src\Misc\Hooks.Demo.cpp` | `ScenarioClass::Start` 时建立注册表 |
-
-扩展新版本 Ares 时，只要用 §10.3 的方法重新定位那三个 RVA，填进 `Offsets_Ares30` 旁边即可；
-版本用 PE `TimeDateStamp` 区分（3.0 = `0x5fc37ef6`，3.0p1 = `0x61daa114`，与 Phobos 的
-`AresHelper` 一致）。
-
-### 10.7 已知限制
-
-- **依赖 Ares**：Ares 缺席时功能自动停用并打日志，不会崩。
-- **目前只映射了 Ares 3.0**；检测到 3.0p1 会明确记录"偏移未映射"并停用。
-- `IsProvidedByHouse` 用的是 `CountOwnedAndPresent`（"Active"计数器，即已部署在场上的单位），
-  因此**装在运输载具里（limbo）的单位不算提供者**——这与 Ares 对建筑的
-  `IsAlive && !InLimbo` 判定一致。
-- 超武仍然从玩家层面发射，不是从单位身上发射；单位不享有独立的充能计时。
+| 功能 | 文档 | 状态 | 依赖 |
+|---|---|---|---|
+| 单位提供超级武器 | [functions/unit-superweapons.md](functions/unit-superweapons.md) | ✅ 实测通过 | Ares 3.0 |
