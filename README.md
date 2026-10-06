@@ -102,6 +102,17 @@ derived. General development practice lives in the guide.
 |---|---|---|
 | Unit-provided superweapons | [unit-superweapons.md](docs/functions/unit-superweapons.md) | Ares 3.0 |
 
+## Research
+
+Feasibility studies for features that are **not** implemented, in [`docs/research/`](docs/research/).
+Each records the evidence (addresses, file/line references) and separates verified facts from
+inference.
+
+| Study | Doc | Verdict |
+|---|---|---|
+| LLM-driven AI (`aimd.ini`) | [feasibility-llm-ai-and-modern-formats.md](docs/research/feasibility-llm-ai-and-modern-formats.md) | Feasible only as an **offline content generator**; in-match calls cannot work under YR's lockstep + RNG-synchronised model |
+| Modern asset formats (PNG/GIF/GLB for SHP/VXL) | same document | Feasible only as **authoring formats with a build-time conversion**; the engine cannot read them directly |
+
 ## Layout
 
 ```
@@ -112,6 +123,7 @@ src/Misc/AresUnitSuperWeapon.cpp  the Ares 3.0 call-site patch
 src/Utilities/                logging, patch engine, patch macros
 docs/DEVELOPMENT.md           general development guide
 docs/functions/               one document per implemented feature
+docs/research/                feasibility studies for unimplemented ideas
 scripts/                      build, deploy, restore
 YRpp/                         game binary type definitions (submodule)
 ```
