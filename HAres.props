@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup>
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>NotSet</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  <PropertyGroup>
+    <GenerateManifest>false</GenerateManifest>
+    <IntDir>$(Configuration)\IntDir\</IntDir>
+    <!-- src\ first so that <Utilities/Foo.h> and <HAres.h> resolve, then YRpp. -->
+    <IncludePath>$(ExpandedIncludePath);$(MSBuildThisFileDirectory)src\;$(YRppDir);$(VC_IncludePath)</IncludePath>
+    <LinkIncremental>false</LinkIncremental>
+    <OutDir>$(Configuration)\</OutDir>
+    <CoreLibraryDependencies></CoreLibraryDependencies>
+    <HAresExtraLibs>dbghelp.lib</HAresExtraLibs>
+  </PropertyGroup>
+  <!--
+    The compiler settings below are NOT arbitrary: gamemd.exe was built with a specific ABI and
+    the injected code shares the game's stack, heap and C++ objects. Deviating from these will
+    produce silent memory corruption rather than a compile error. See docs\DEVELOPMENT.md.
+  -->
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <SDLCheck>false</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <!-- SYR_VER=2 selects the .syhks00-section hook declaration format used by Syringe/SyringeEx. -->
+      <PreprocessorDefinitions>SYR_VER=2;HAS_EXCEPTIONS=0;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;%(PreprocessorDefinitions);HARES_DLL="$(ProjectName).dll"</PreprocessorDefinitions>
+      <StringPooling>true</StringPooling>
+      <ExceptionHandling>false</ExceptionHandling>
+      <!-- /MT: must match the game's static CRT. Never use /MD. -->
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <!-- /Zp8 -->
+      <StructMemberAlignment>8Bytes</StructMemberAlignment>
+      <!-- /GS- -->
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <ControlFlowGuard>false</ControlFlowGuard>
+      <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
+      <EnforceTypeConversionRules>true</EnforceTypeConversionRules>
+      <!-- RTTI off: dynamic_cast is unavailable; use specific_cast/generic_cast from YRpp. -->
+      <RuntimeTypeInfo>false</RuntimeTypeInfo>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <!-- One .obj per source file path, so that same-named files in different folders do not collide. -->
+      <ObjectFileName>$(IntDir)\%(Directory)</ObjectFileName>
+      <!-- /Gz: default calling convention __stdcall, matching the game binary. -->
+      <CallingConvention>StdCall</CallingConvention>
+      <DisableSpecificWarnings>4100;4201;4530;4731;4740;4458;4819;5103;5105</DisableSpecificWarnings>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+    </ClCompile>
+    <Link>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>$(HAresExtraLibs);%(AdditionalDependencies)</AdditionalDependencies>
+      <SubSystem>Windows</SubSystem>
+      <ProgramDatabaseFile>$(OutDir)$(TargetName).pdb</ProgramDatabaseFile>
+      <ImportLibrary>$(IntDir)$(TargetName).lib</ImportLibrary>
+    </Link>
+  </ItemDefinitionGroup>
+  <!-- Release -->
+  <ItemDefinitionGroup Condition="$(Configuration.Contains('Release'))">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <OmitFramePointers>true</OmitFramePointers>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <!-- Debug -->
+  <ItemDefinitionGroup Condition="$(Configuration.Contains('Debug'))">
+    <ClCompile>
+      <PreprocessorDefinitions>DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <Optimization>Disabled</Optimization>
+      <OmitFramePointers>false</OmitFramePointers>
+      <DisableSpecificWarnings>4100;4201;4530;4731;4740;4458;4819;5103;5105;26495</DisableSpecificWarnings>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+  </ItemDefinitionGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>
