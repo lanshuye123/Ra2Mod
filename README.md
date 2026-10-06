@@ -12,8 +12,11 @@ features, so HAres takes the same route Phobos took: a separate hook DLL that pa
 ## Status
 
 Verified on this machine: builds clean with MSVC v143 (VS2022), is recognised by both the original
-Syringe 0.7.3.0 and a locally built SyringeEx 0.1.0.2, and its hooks execute inside `gamemd.exe`
-(see the verification section of the development guide).
+Syringe 0.7.3.0 and a locally built SyringeEx 0.1.0.2, and runs alongside Ares 3.0 and Phobos in a
+real game session. The game reaches the main menu and four of the five demo hooks have been observed
+executing (`ExeRun`, `YR_CmdLineParse`, `ScenarioClass::Start`, `GScreenClass_DrawText`); the fifth
+(`ExeTerminate`) only runs on a clean process exit. See the verification section of the development
+guide for the raw log evidence.
 
 ## Requirements
 
@@ -40,18 +43,34 @@ git submodule update --init --recursive
 
 ```bat
 scripts\deploy.bat Release D:\Games\Ra2
-
-cd D:\Games\Ra2
-Syringe.exe "gamemd.exe" -CD -NOLOGO -LOG
 ```
+
+That copies `HAres.dll` and `RunHAres.bat` next to `gamemd.exe` and creates a default
+`HAres.ini` if you do not have one. Then just run the deployed launcher:
+
+```bat
+D:\Games\Ra2\RunHAres.bat
+```
+
+which expands to:
+
+```bat
+Syringe.exe "gamemd.exe" --handshakes --args="-WIN -CD -NOLOGO -LOG -AI-CONTROL"
+```
+
+Note the argument style: **SyringeEx requires game arguments after `--args="..."`.** Anything else on
+the command line is treated as one of Syringe's own options and never reaches the game, which silently
+loses `-LOG` (no `debug.log`) and `-WIN` (the game then dies at DirectDraw `CreateSurface 80070057`).
+The original closed-source Syringe instead wants them as trailing arguments - `RunHAres.bat /oldsyringe`
+switches back to that form.
 
 Logs to inspect:
 
 | File | Contents |
 |---|---|
 | `HAres.log` | This DLL's own log, flushed after every line so it survives a crash |
-| `syringe.log` | DLL recognition, hook count, exceptions |
-| `debug\debug.log` | Ares/Phobos log (needs the `-LOG` command line flag) |
+| `syringe.log` | DLL recognition, handshakes, hook count, exceptions |
+| `debug\debug.log` | Ares/Phobos log (needs `-LOG`) |
 
 `scripts\restore_game_dir.bat` restores the game directory from `_dsh_backup_orig\`.
 

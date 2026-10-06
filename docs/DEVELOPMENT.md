@@ -13,11 +13,12 @@ cd D:\Codes\RA2Mods\HAres
 scripts\build_debug.bat          :: -> Debug\HAres.dll + HAres.pdb
 scripts\build_release.bat        :: -> Release\HAres.dll + HAres.pdb
 
-:: 部署到游戏目录
+:: 部署到游戏目录（同时会放好 RunHAres.bat）
 scripts\deploy.bat Release D:\Games\Ra2
 
-:: 启动（游戏目录下）
-Syringe.exe "gamemd.exe" -CD -NOLOGO -LOG
+:: 启动：直接双击/运行游戏目录下的 RunHAres.bat
+::   = Syringe.exe "gamemd.exe" --handshakes --args="-WIN -CD -NOLOGO -LOG -AI-CONTROL"
+D:\Games\Ra2\RunHAres.bat
 
 :: 看日志
 D:\Games\Ra2\HAres.log            :: 自己的日志
@@ -281,10 +282,42 @@ DSurface::Create_Primary - Creating surface
 CreateSurface failed with error code 80070057
 ```
 `0x80070057` = `E_INVALIDARG`。这是 DirectDraw 在当前会话下无法创建主表面导致的，
-**与 HAres 无关**（去掉 HAres 一模一样）。RA2 引擎太老，这类问题社区的通用解法是第三方渲染补丁或窗口模式。
+**与 HAres 无关**（去掉 HAres 一模一样）。
 
-> 也就是说：**构建环境、注入链路、hook 执行都已验证正常**；
-> 唯一没能观察到的是"进主菜单后画面上的水印"，因为它被 DirectDraw 这一步挡住了。
+**（6）加上 `-WIN` 窗口模式后，游戏正常进入主菜单，全部 hook 都被证实执行** ✅
+
+这是最终、最完整的一次验证：
+
+```
+syringe.log:
+  arguments = "gamemd.exe --handshakes --args=-WIN -CD -NOLOGO -LOG -AI-CONTROL "
+  Handshake: Answers "Found Yuri's Revenge 1.001 (modified). Applying Ares 3.0."
+  Recognized DLL: "Ares.dll" / "HAres.dll" / "Phobos.dll"
+  Done (3112 hooks added).
+  → gamemd 存活，窗口标题 "Yuri's Revenge"
+
+HAres.log:
+  [Init] complete
+  [CmdLine] arg[0] = D:\Games\Ra2\gamemd.exe
+  [CmdLine] arg[1] = -WIN
+  ... arg[5] = -AI-CONTROL
+  [Hook] ScenarioClass::Start #1
+  [Hook]   FileName="XMP22S8.MAP"
+  [Hook]   Rules loaded, MessageDelay=1073741824
+  [Hook] GScreenClass::DrawText fired (surface 1112x720)
+
+debug\debug.log:
+  Initialized Ares version: 20.333.289
+  [Phobos] Initialized version: v0.5.0.0 @ 3a26b8c0 @ refs/heads/develop
+```
+
+所以 HAres 的 5 个 hook 中，`ExeRun`、`YR_CmdLineParse`、`ScenarioClass::Start`、
+`GScreenClass_DrawText` 四个**已用实际执行结果证实**（`ExeTerminate` 只在进程正常退出时才跑，
+测试中是强制结束进程的，所以未观察到）。
+
+> **结论：构建环境、注入链路、参数传递、hook 执行全部验证通过，
+> Ares 3.0 + Phobos + HAres 三者共存无冲突。**
+> 关键前提是**窗口模式**：RA2 引擎太老，不加 `-WIN` 会在 DirectDraw 建表面时失败退出。
 
 ---
 
@@ -415,8 +448,7 @@ DEFINE_HOOK(0x683E7F, HAres_ScenarioClass_Start, 0x7)
 ```bat
 scripts\build_release.bat
 scripts\deploy.bat
-cd D:\Games\Ra2
-Syringe.exe "gamemd.exe" -CD -NOLOGO -LOG
+D:\Games\Ra2\RunHAres.bat
 ```
 
 **⑤ 看 `HAres.log` 确认 hook 执行。**
@@ -652,19 +684,48 @@ Done with exit code 0                                      ← 游戏正常退�
 
 ## 7. 部署与还原
 
-### 7.1 部署
+### 7.1 部署与启动
 
 ```bat
-:: HAres 自己的 DLL
+:: 编译产物 -> 游戏目录（同时会部署 RunHAres.bat，并在缺失时生成默认 HAres.ini）
 HAres\scripts\deploy.bat Release D:\Games\Ra2
 
-:: Phobos（如果改了 Phobos）
-copy /Y Phobos\Release\Phobos.dll D:\Games\Ra2\
-copy /Y Phobos\Release\Phobos.pdb D:\Games\Ra2\
-
-:: SyringeEx
+:: 改了 Phobos / SyringeEx 的话
+copy /Y Phobos\Release\Phobos.dll    D:\Games\Ra2\
+copy /Y Phobos\Release\Phobos.pdb    D:\Games\Ra2\
 copy /Y SyringeEx\Release\Syringe.exe D:\Games\Ra2\
 ```
+
+启动直接用部署好的 `D:\Games\Ra2\RunHAres.bat`（窗口模式 + 日志 + 跳过 logo），
+或手工执行：
+
+```bat
+Syringe.exe "gamemd.exe" --handshakes --args="-WIN -CD -NOLOGO -LOG -AI-CONTROL"
+```
+
+#### ⚠️ SyringeEx 与老 Syringe 的参数语法不一样（很容易踩）
+
+SyringeEx 重写了命令行解析（`SyringeEx\Support.h` 的 `parse_command_line`）：
+
+| | 游戏参数怎么传 |
+|---|---|
+| **原版闭源 Syringe** | 直接跟在后面：`Syringe.exe "gamemd.exe" -WIN -CD -NOLOGO -LOG` |
+| **SyringeEx** | **必须**用 `--args="..."`：`Syringe.exe "gamemd.exe" --args="-WIN -CD -NOLOGO -LOG"` |
+
+SyringeEx 把**所有不是 exe 名、也不是 `--args=` 的参数**都归入 `syringe_arguments`，即它自己的选项，
+**根本不会传给游戏**。后果非常隐蔽：
+
+- 游戏实际上只收到 `argv[0]`，`-NOLOGO` / `-LOG` / `-WIN` 全部丢失；
+- 于是 `debug\debug.log` 不生成（因为 Ares 没收到 `-LOG`）；
+- 而且不加 `-WIN` 就会撞上 DirectDraw 建表面失败直接退出。
+
+**怎么发现**：看 `HAres.log` 里的 `[CmdLine] arg[n]`。如果只有 `arg[0]`，就是参数没传进去。
+
+> SyringeEx 另外有个 `--handshakes` 开关，默认**关闭**（即不调用 DLL 的 `SyringeHandshake`）。
+> 上面的 `RunHAres.bat` 默认加上它，以还原原版 Syringe 的行为（日志里能看到
+> `Answers "Found Yuri's Revenge 1.001 (modified). Applying Ares 3.0."`）。
+> 实测**去掉它游戏也能正常跑**，Ares 一样会初始化 —— 它不是必需项。
+> 唯一的区别是：若某个 DLL 的 handshake 会拒绝加载，加了这个开关它就不会被装载。
 
 ### 7.2 本次验证对游戏目录做了什么
 
@@ -711,6 +772,9 @@ HAres\scripts\restore_game_dir.bat
 | 漏写 `DllMain` | 空指针崩溃（见 §6.3） | 记得保存 `hInstance` |
 | 忘记把新 `.cpp` 加进 vcxproj | 代码"没生效" | 登记到 `<ClCompile>` |
 | 装了新 Phobos 却用老 Syringe | 弹框拒绝启动 | 配套用 SyringeEx |
+| SyringeEx 下把游戏参数直接跟在后头 | 游戏只收到 `argv[0]`，`-LOG` 等全丢 | 必须 `--args="..."`（§7.1） |
+| 不加 `-WIN` | DirectDraw `CreateSurface 80070057` 后退出 | 用窗口模式启动 |
+| 连续 kill 后立刻再启动 Syringe | `拒绝访问` 无法启动 | 等 10 秒左右再启动 |
 
 ---
 

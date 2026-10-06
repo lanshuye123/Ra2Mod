@@ -28,5 +28,18 @@ if not exist "%GAMEDIR%\gamemd.exe" (
 copy /Y "%CONFIG%\HAres.dll" "%GAMEDIR%\HAres.dll" >nul
 if exist "%CONFIG%\HAres.pdb" copy /Y "%CONFIG%\HAres.pdb" "%GAMEDIR%\HAres.pdb" >nul
 
-echo Deployed %CONFIG%\HAres.dll to %GAMEDIR%
+rem The launcher lives next to gamemd.exe so it can be double-clicked.
+copy /Y "scripts\RunHAres.bat" "%GAMEDIR%\RunHAres.bat" >nul
+
+rem Create a default config only if the user does not have one yet, so that
+rem re-deploying never overwrites local settings.
+if not exist "%GAMEDIR%\HAres.ini" (
+  >"%GAMEDIR%\HAres.ini" echo [General]
+  >>"%GAMEDIR%\HAres.ini" echo ShowWatermark=1
+  >>"%GAMEDIR%\HAres.ini" echo VerboseLog=0
+  >>"%GAMEDIR%\HAres.ini" echo WatermarkCorner=0
+  echo Created default HAres.ini
+)
+
+echo Deployed %CONFIG%\HAres.dll + RunHAres.bat to %GAMEDIR%
 endlocal
