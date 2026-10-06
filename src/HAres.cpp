@@ -1,5 +1,6 @@
 #include <HAres.h>
 
+#include <Misc/UnitSuperWeapon.h>
 #include <Utilities/Debug.h>
 #include <Utilities/Patch.h>
 
@@ -87,6 +88,10 @@ void HAres::ExeRun()
 	// Applies every DEFINE_PATCH / DEFINE_JUMP that was compiled into the .patch section.
 	Debug::LogLine("[Init] applying static patches");
 	Patch::ApplyStatic();
+
+	// Ares is injected by Syringe before the game starts, so it is already loaded
+	// here. This installs the patch that lets units provide superweapons.
+	UnitSuperWeapon::InitAresIntegration();
 
 	Debug::LogLine("[Init] complete");
 }

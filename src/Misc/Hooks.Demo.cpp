@@ -1,5 +1,6 @@
 #include <HAres.h>
 
+#include <Misc/UnitSuperWeapon.h>
 #include <Utilities/Debug.h>
 #include <Utilities/Macro.h>
 #include <Utilities/Patch.h>
@@ -128,6 +129,8 @@ DEFINE_HOOK(0x4F4583, HAres_GScreenClass_DrawText, 0x6)
 			pSurface->GetWidth(), pSurface->GetHeight());
 	}
 
+	UnitSuperWeapon::TickDiagnostics();
+
 	auto const wanted = Drawing::GetTextDimensions(HAres::VersionDescription, { 0, 0 }, 0, 2, 0);
 
 	const int marginX = 10;
@@ -172,6 +175,11 @@ DEFINE_HOOK(0x683E7F, HAres_ScenarioClass_Start, 0x7)
 	++s_ScenarioStarts;
 
 	Debug::LogLine("[Hook] ScenarioClass::Start #%d", s_ScenarioStarts);
+
+	// rulesmd.ini is loaded by now, so this is the earliest point at which the
+	// SuperWeapon= keys on unit types can be read.
+	UnitSuperWeapon::BuildRegistry();
+	UnitSuperWeapon::LogRegistry();
 
 	auto const pScenario = ScenarioClass::Instance;
 

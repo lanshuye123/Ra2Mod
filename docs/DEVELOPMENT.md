@@ -775,6 +775,8 @@ HAres\scripts\restore_game_dir.bat
 | SyringeEx 下把游戏参数直接跟在后头 | 游戏只收到 `argv[0]`，`-LOG` 等全丢 | 必须 `--args="..."`（§7.1） |
 | 不加 `-WIN` | DirectDraw `CreateSurface 80070057` 后退出 | 用窗口模式启动 |
 | 连续 kill 后立刻再启动 Syringe | `拒绝访问` 无法启动 | 等 10 秒左右再启动 |
+| 调用 Ares/游戏函数时猜调用约定 | 栈被破坏，几帧后跳到垃圾地址崩 | 本栈全是 `/Gz`，自由函数默认 **`__stdcall`**；用反汇编末尾的 `RET n` 确认（§10.4） |
+| 想 hook Ares 已接管的函数 | 自己的 hook 根本不执行 | Ares 的 hook `return` 非零，链就断了；只能改 Ares 内部或另找注入点（§10.3） |
 
 ---
 
@@ -826,3 +828,143 @@ HAres 源码      D:\Codes\RA2Mods\HAres
 - YRpp：<https://github.com/Phobos-developers/YRpp>
 - IDA Pro MCP（让 AI 直接查反汇编，做 hook 开发强烈推荐）：
   <https://github.com/mrexodia/ida-pro-mcp>
+
+---
+
+## 10. 实战案例：让单位提供超级武器（已实现并实测通过）
+
+这是本工程第一个真正的功能，完整走了一遍"读源码 → 反汇编 → 设计 → 实现 → 上机验证"，
+可作为以后做其它功能的模板。
+
+### 10.1 需求与语义
+
+让**载具 / 步兵 / 飞机**也能给玩家提供超武，而不只是建筑：
+
+```ini
+[MTNK]
+SuperWeapon=IronCurtainSpecial
+SuperWeapon2=AmericasParaDropSpecial
+SuperWeapons=ChronoSphereSpecial,AmericasParaDropSpecial   ; 列表形式
+```
+
+语义：玩家**拥有至少一辆**该单位时获得超武，全部损失后失去。超武仍然是玩家级的
+（侧边栏按钮 → 点地图发射），单位只是"会移动的提供者"。
+
+### 10.2 原版机制
+
+`HouseClass::UpdateSuperWeaponsOwned`（`0x50AF10`）与 `UpdateSuperWeaponsUnavailable`（`0x50B1D0`）
+在每个 house 更新时跑，扫描该 house 的建筑，看 `BuildingTypeClass::SuperWeapon`（类型 +0x16F0）
+/ `SuperWeapon2`（+0x16F4）是否等于某个超武下标，然后决定 `Grant` / `Lose` / `SetOnHold`。
+原版还会扫描建筑的第 3 个字段（升级槽）。
+
+关键结构（已用反汇编核对）：
+
+| 字段 | 偏移 |
+|---|---|
+| `SuperClass::Type` | +0x28 |
+| `SuperClass::CanHold` | +0x60 |
+| `SuperClass::Granted`（Phobos 里叫 `IsPresent`） | +0x6D |
+| `SuperClass::OneTime`（`IsOneTime`） | +0x6E |
+| `SuperClass::IsCharged`（`IsReady`） | +0x6F |
+| `SuperClass::IsOnHold`（`IsSuspended`） | +0x70 |
+| `HouseClass::Supers`（数据指针 / 个数） | +0x258 / +0x264 |
+| `HouseClass::Defeated` | +0x1F5 |
+| `BuildingTypeClass::SuperWeapon` / `SuperWeapon2` | +0x16F0 / +0x16F4 |
+
+> 注意 Phobos 的 YRpp 与 Ares 的 YRpp 给同一批字段起了不同名字
+> （`Granted`→`IsPresent`、`IsCharged`→`IsReady`、`IsOnHold`→`IsSuspended`），
+> **偏移和顺序完全一致**，用哪套名字都行，但别被名字绕晕。
+
+### 10.3 与 Ares 的冲突（本次最大的坑）
+
+Ares 3.0 把这两个函数**整个替换掉了**，而且它的 hook 都 `return` 一个非零地址；
+Syringe 只对 `return 0` 的 hook 做链式调用，所以**我们在同样地址上挂 hook 永远不会被执行**。
+`SuperClass::Lose`（`0x6CB7B0`）同理。
+
+Ares 3.0 的实际实现（反汇编得到，比 0.A 源码更简单）：
+
+```cpp
+// Ares.dll + 0x38F10，__stdcall
+std::vector<SWStatus>* GetSuperWeaponStatuses(HouseClass* pHouse);
+// SWStatus = { bool Available; bool PowerSourced; bool Charging; }  每项 3 字节，
+// 由 SuperWeaponTypeClass::ArrayIndex 索引
+```
+
+两个 hook 都调用它。它只扫 `pHouse->Buildings`。
+
+**解法**：把这两处对 `GetSuperWeaponStatuses` 的调用**改指向我们自己的包装函数**——
+先调用原函数，再把"由单位提供"的超武标成可用。之后 Ares 自己的
+Grant / Lose / SetOnHold / 侧边栏 cameo / 断电规则全部照旧生效，不存在任何状态争夺。
+
+实测的调用点（`Ares.dll`，PE 时间戳 `0x5fc37ef6`，即 3.0）：
+
+| 位置 | RVA |
+|---|---|
+| `GetSuperWeaponStatuses` | `0x38F10` |
+| 第一个调用点（Owned） | `0x3945B` |
+| 第二个调用点（Unavailable） | `0x395A7` |
+
+定位方法（可复用，不必依赖 Ghidra）：Ares 的两个 hook 是**导出函数**，用
+`dumpbin /exports` 拿到它们的 RVA，然后在各自函数体内扫描 `E8 rel32` 调用，
+**取两个函数调用目标的交集**，再按源码里的调用顺序确定哪个是目标函数。
+
+### 10.4 第二个坑：调用约定
+
+Ares、Phobos、HAres 都用 `/Gz`（默认 `__stdcall`）。所以 Ares 里的**自由函数**
+（不是显式写了 `__cdecl` 的 Syringe hook 导出）默认是 **`__stdcall`**。
+
+第一版我把 `GetSuperWeaponStatuses` 声明成了 `__cdecl`，结果每次调用**栈多弹 4 字节**，
+跑几十帧后跳到垃圾地址崩溃：
+
+```
+Exception (Code: 0xC0000005 at 0x329344F8)
+Eax:5F291C90        ← Ares 基址 0x5F1D0000 + 0xC1C90，正是那个静态 vector
+Bytes at CS:EIP: A0 A8 7E 00 84 A8 7E 00 ...   ← EIP 落在数据表里
+```
+
+**怎么确认调用约定**：看函数末尾的 `RET`：
+- `C3` → `RET`，无参清理 → `__cdecl`（调用方清栈）
+- `C2 04 00` → `RET 4` → `__stdcall`，清理 1 个参数（被调方清栈）
+
+本例三个出口都是 `C2 04 00`，即 `__stdcall`。**改对之后就再也没崩过。**
+
+### 10.5 实测结果
+
+`HAres.log`（`RunHAres.bat` 启动，Ares 3.0 + Phobos + HAres）：
+
+```
+[UnitSW] redirected GetSuperWeaponStatuses call at Ares+0x3945B
+[UnitSW] redirected GetSuperWeaponStatuses call at Ares+0x395A7
+[UnitSW] Ares 3.0 integration ACTIVE (2 call site(s) patched)
+[UnitSW] AMCV provides 1 superweapon(s)
+[UnitSW] registry built: 3 provider(s), 1 distinct superweapon(s)
+[UnitSW] "IronCurtainSpecial": providedByUnit=1 granted=0 charged=0 rechargeLeft=0
+[UnitSW] superweapon "IronCurtainSpecial" (index 1) made available by a unit provider to the human player
+[UnitSW] "IronCurtainSpecial": providedByUnit=1 granted=1 charged=0 rechargeLeft=4499   ← Ares 授予并开始充能
+[UnitSW] "IronCurtainSpecial": providedByUnit=0 granted=0 charged=0 rechargeLeft=4247   ← 单位没了 → 超武收回
+[UnitSW] "IronCurtainSpecial": providedByUnit=1 granted=1 charged=0 rechargeLeft=4499   ← 单位回来 → 重新授予
+```
+
+第二轮的状态变化正好对应 MCV 展开成建造厂（`providedByUnit` 1→0）以及之后又拥有提供者。
+全程 `syringe.log` 只有那两个正常的 `0xE06D7363`，**没有任何访问违例**。
+
+### 10.6 代码位置
+
+| 文件 | 作用 |
+|---|---|
+| `src\Misc\UnitSuperWeapon.cpp/.h` | 读 INI 建立"提供者"表；O(1) 查询 house 是否拥有提供者；诊断日志 |
+| `src\Misc\AresUnitSuperWeapon.cpp` | 识别 Ares 版本、按 RVA 改写两个调用点、包装函数 |
+| `src\Misc\Hooks.Demo.cpp` | `ScenarioClass::Start` 时建立注册表 |
+
+扩展新版本 Ares 时，只要用 §10.3 的方法重新定位那三个 RVA，填进 `Offsets_Ares30` 旁边即可；
+版本用 PE `TimeDateStamp` 区分（3.0 = `0x5fc37ef6`，3.0p1 = `0x61daa114`，与 Phobos 的
+`AresHelper` 一致）。
+
+### 10.7 已知限制
+
+- **依赖 Ares**：Ares 缺席时功能自动停用并打日志，不会崩。
+- **目前只映射了 Ares 3.0**；检测到 3.0p1 会明确记录"偏移未映射"并停用。
+- `IsProvidedByHouse` 用的是 `CountOwnedAndPresent`（"Active"计数器，即已部署在场上的单位），
+  因此**装在运输载具里（limbo）的单位不算提供者**——这与 Ares 对建筑的
+  `IsAlive && !InLimbo` 判定一致。
+- 超武仍然从玩家层面发射，不是从单位身上发射；单位不享有独立的充能计时。
